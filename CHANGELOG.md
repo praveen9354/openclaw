@@ -12,6 +12,7 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+- CLI/nodes: make unfiltered `openclaw nodes list` prefer the effective paired-node view used by `nodes status` while preserving pending rows, pairing-scope fallback, and paired JSON metadata. Fixes #46871; carries forward #65772. Thanks @skainguyen1412.
 - Plugins/install: stage bundled plugin runtime dependencies before Gateway startup and drain update restarts while preserving per-plugin isolation when pre-stage scan or install fails. Thanks @codex.
 - CLI/startup: read generated startup metadata from the bundled `dist` layout before falling back to live help rendering, so root/browser help and channel-option bootstrap stay on the fast path. Thanks @vincentkoc.
 - CLI/help: treat positional `help` invocations like `openclaw channels help` as help paths for startup gating, avoiding model/auth warmup while preserving positional arguments such as `openclaw docs help`. Thanks @gumadeiras.

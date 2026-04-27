@@ -14,7 +14,9 @@ import { getNodesTheme, runNodesCommand } from "./cli-utils.js";
 import { formatPermissions, parseNodeList, parsePairingList } from "./format.js";
 import { renderPendingPairingRequestsTable } from "./pairing-render.js";
 import { callGatewayCli, nodesCallOpts, resolveNodeId } from "./rpc.js";
-import type { NodesRpcOpts } from "./types.js";
+import type { NodeListNode, NodesRpcOpts, PairedNode } from "./types.js";
+
+type PairedNodeListRow = PairedNode & Partial<NodeListNode>;
 
 function formatVersionLabel(raw: string) {
   const trimmed = raw.trim();
@@ -108,6 +110,61 @@ function parseSinceMs(raw: unknown, label: string): number | undefined {
     defaultRuntime.error(`${label}: ${message}`);
     defaultRuntime.exit(1);
     return undefined;
+  }
+}
+
+function mergePairedNodeWithEffectiveNode(
+  paired: PairedNode | undefined,
+  effective: NodeListNode,
+): PairedNodeListRow {
+  return {
+    ...paired,
+    ...effective,
+    token: paired?.token,
+    createdAtMs: paired?.createdAtMs,
+    lastConnectedAtMs: paired?.lastConnectedAtMs ?? effective.connectedAtMs,
+    displayName: effective.displayName ?? paired?.displayName,
+    platform: effective.platform ?? paired?.platform,
+    version: effective.version ?? paired?.version,
+    coreVersion: effective.coreVersion ?? paired?.coreVersion,
+    uiVersion: effective.uiVersion ?? paired?.uiVersion,
+    remoteIp: effective.remoteIp ?? paired?.remoteIp,
+    permissions: effective.permissions ?? paired?.permissions,
+    approvedAtMs: effective.approvedAtMs ?? paired?.approvedAtMs,
+  };
+}
+
+function mergePairedNodesWithEffectiveNodes(
+  paired: PairedNode[],
+  effectiveNodes: NodeListNode[] | null,
+): PairedNodeListRow[] {
+  if (effectiveNodes === null) {
+    return paired;
+  }
+  const pairedById = new Map(paired.map((node) => [node.nodeId, node]));
+  const seen = new Set<string>();
+  const rows: PairedNodeListRow[] = [];
+  for (const effective of effectiveNodes) {
+    const pairedNode = pairedById.get(effective.nodeId);
+    if (!pairedNode && effective.paired === false) {
+      continue;
+    }
+    seen.add(effective.nodeId);
+    rows.push(mergePairedNodeWithEffectiveNode(pairedNode, effective));
+  }
+  for (const node of paired) {
+    if (!seen.has(node.nodeId)) {
+      rows.push(node);
+    }
+  }
+  return rows;
+}
+
+async function tryReadNodeList(opts: NodesRpcOpts): Promise<NodeListNode[] | null> {
+  try {
+    return parseNodeList(await callGatewayCli("node.list", opts, {}));
+  } catch {
+    return null;
   }
 }
 
@@ -329,28 +386,22 @@ export function registerNodesStatusCommands(nodes: Command) {
           const now = Date.now();
           const hasFilters = connectedOnly || sinceMs !== undefined;
           const pendingRows = hasFilters ? [] : pending;
-          const connectedById = hasFilters
-            ? new Map(
-                parseNodeList(await callGatewayCli("node.list", opts, {})).map((node) => [
-                  node.nodeId,
-                  node,
-                ]),
-              )
-            : null;
-          const filteredPaired = paired.filter((node) => {
+          const effectiveNodes = hasFilters
+            ? parseNodeList(await callGatewayCli("node.list", opts, {}))
+            : await tryReadNodeList(opts);
+          const pairedRows = mergePairedNodesWithEffectiveNodes(paired, effectiveNodes);
+          const filteredPaired = pairedRows.filter((node) => {
             if (connectedOnly) {
-              const live = connectedById?.get(node.nodeId);
-              if (!live?.connected) {
+              if (!node.connected) {
                 return false;
               }
             }
             if (sinceMs !== undefined) {
-              const live = connectedById?.get(node.nodeId);
               const lastConnectedAtMs =
                 typeof node.lastConnectedAtMs === "number"
                   ? node.lastConnectedAtMs
-                  : typeof live?.connectedAtMs === "number"
-                    ? live.connectedAtMs
+                  : typeof node.connectedAtMs === "number"
+                    ? node.connectedAtMs
                     : undefined;
               if (typeof lastConnectedAtMs !== "number") {
                 return false;
@@ -386,12 +437,11 @@ export function registerNodesStatusCommands(nodes: Command) {
 
           if (filteredPaired.length > 0) {
             const pairedRows = filteredPaired.map((n) => {
-              const live = connectedById?.get(n.nodeId);
               const lastConnectedAtMs =
                 typeof n.lastConnectedAtMs === "number"
                   ? n.lastConnectedAtMs
-                  : typeof live?.connectedAtMs === "number"
-                    ? live.connectedAtMs
+                  : typeof n.connectedAtMs === "number"
+                    ? n.connectedAtMs
                     : undefined;
               return {
                 Node: n.displayName?.trim() ? n.displayName.trim() : n.nodeId,
