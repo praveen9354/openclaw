@@ -38,12 +38,16 @@ export async function handleWhatsAppLogout(host: ChannelsActionHost) {
 
 export async function handleChannelConfigSave(host: ChannelsActionHost) {
   await saveConfig(host as ConfigState);
+  const saveError = host.lastError;
   await loadConfig(host as ConfigState);
+  if (saveError && !host.lastError) {
+    host.lastError = saveError;
+  }
   await loadChannels(host as ChannelsState, true);
 }
 
 export async function handleChannelConfigReload(host: ChannelsActionHost) {
-  await loadConfig(host as ConfigState);
+  await loadConfig(host as ConfigState, { discardPendingChanges: true });
   await loadChannels(host as ChannelsState, true);
 }
 
@@ -81,6 +85,17 @@ function buildNostrProfileUrl(accountId: string, suffix = ""): string {
 function buildGatewayHttpHeaders(host: ChannelsActionHost): Record<string, string> {
   const authorization = resolveControlUiAuthHeader(host);
   return authorization ? { Authorization: authorization } : {};
+}
+
+function getNostrProfileFromSnapshot(
+  host: ChannelsActionHost,
+  accountId: string,
+): NostrProfile | null {
+  const accounts = host.channelsSnapshot?.channelAccounts?.nostr ?? [];
+  const account = accounts.find((entry) => entry.accountId === accountId) as
+    | { profile?: NostrProfile | null }
+    | undefined;
+  return account?.profile ?? null;
 }
 
 export function handleNostrProfileEdit(
@@ -183,7 +198,7 @@ export async function handleNostrProfileSave(host: ChannelsActionHost) {
       return;
     }
 
-    host.nostrProfileFormState = {
+    const savedState: NonNullable<NostrProfileFormState> = {
       ...state,
       saving: false,
       error: null,
@@ -191,7 +206,19 @@ export async function handleNostrProfileSave(host: ChannelsActionHost) {
       fieldErrors: {},
       original: { ...state.values },
     };
+    host.nostrProfileFormState = savedState;
     await loadChannels(host as ChannelsState, true);
+    const savedProfile = getNostrProfileFromSnapshot(host, accountId);
+    if (host.nostrProfileAccountId === accountId && host.nostrProfileFormState === savedState) {
+      const savedValues = savedProfile
+        ? createNostrProfileFormState(savedProfile).values
+        : state.values;
+      host.nostrProfileFormState = {
+        ...savedState,
+        values: savedValues,
+        original: { ...savedValues },
+      };
+    }
   } catch (err) {
     host.nostrProfileFormState = {
       ...state,
