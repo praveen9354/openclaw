@@ -162,6 +162,8 @@ interface ChatEphemeralState {
   searchOpen: boolean;
   searchQuery: string;
   pinnedExpanded: boolean;
+  /** True while an IME composition session is active (CJK/etc). */
+  composing: boolean;
 }
 
 function createChatEphemeralState(): ChatEphemeralState {
@@ -178,6 +180,7 @@ function createChatEphemeralState(): ChatEphemeralState {
     searchOpen: false,
     searchQuery: "",
     pinnedExpanded: false,
+    composing: false,
   };
 }
 
@@ -312,12 +315,14 @@ function renderAttachmentPreview(props: ChatProps): TemplateResult | typeof noth
       ${attachments.map(
         (att) => html`
           <div
-            class=${[
-              "chat-attachment-thumb",
-              isImageAttachment(att) ? "" : "chat-attachment-thumb--file",
-            ]
-              .filter(Boolean)
-              .join(" ")}
+            class=${
+              [
+                "chat-attachment-thumb",
+                isImageAttachment(att) ? "" : "chat-attachment-thumb--file",
+              ]
+                .filter(Boolean)
+                .join(" ")
+            }
           >
             ${isImageAttachment(att)
               ? html`<img src=${att.dataUrl} alt="Attachment preview" />`
@@ -333,10 +338,12 @@ function renderAttachmentPreview(props: ChatProps): TemplateResult | typeof noth
               class="chat-attachment-remove"
               type="button"
               aria-label="Remove attachment"
-              @click=${() => {
-                const next = (props.attachments ?? []).filter((a) => a.id !== att.id);
-                props.onAttachmentsChange?.(next);
-              }}
+              @click=${
+                () => {
+                  const next = (props.attachments ?? []).filter((a) => a.id !== att.id);
+                  props.onAttachmentsChange?.(next);
+                }
+              }
             >
               &times;
             </button>
@@ -497,19 +504,23 @@ function renderSearchBar(requestUpdate: () => void): TemplateResult | typeof not
         placeholder="Search messages..."
         aria-label="Search messages"
         .value=${vs.searchQuery}
-        @input=${(e: Event) => {
-          vs.searchQuery = (e.target as HTMLInputElement).value;
-          requestUpdate();
-        }}
+        @input=${
+          (e: Event) => {
+            vs.searchQuery = (e.target as HTMLInputElement).value;
+            requestUpdate();
+          }
+        }
       />
       <button
         class="btn btn--ghost"
         aria-label="Close search"
-        @click=${() => {
-          vs.searchOpen = false;
-          vs.searchQuery = "";
-          requestUpdate();
-        }}
+        @click=${
+          () => {
+            vs.searchOpen = false;
+            vs.searchQuery = "";
+            requestUpdate();
+          }
+        }
       >
         ${icons.x}
       </button>
@@ -545,10 +556,12 @@ function renderPinnedSection(
       <button
         class="agent-chat__pinned-toggle"
         aria-expanded=${vs.pinnedExpanded}
-        @click=${() => {
-          vs.pinnedExpanded = !vs.pinnedExpanded;
-          requestUpdate();
-        }}
+        @click=${
+          () => {
+            vs.pinnedExpanded = !vs.pinnedExpanded;
+            requestUpdate();
+          }
+        }
       >
         ${icons.bookmark} ${entries.length} pinned
         <span class="collapse-chevron ${vs.pinnedExpanded ? "" : "collapse-chevron--collapsed"}"
@@ -569,10 +582,12 @@ function renderPinnedSection(
                     >
                     <button
                       class="btn btn--ghost"
-                      @click=${() => {
-                        pinned.unpin(index);
-                        requestUpdate();
-                      }}
+                      @click=${
+                        () => {
+                          pinned.unpin(index);
+                          requestUpdate();
+                        }
+                      }
                       title="Unpin"
                     >
                       ${icons.x}
@@ -610,10 +625,12 @@ function renderSlashMenu(
                 role="option"
                 aria-selected=${i === vs.slashMenuIndex}
                 @click=${() => selectSlashArg(arg, props, requestUpdate, true)}
-                @mouseenter=${() => {
-                  vs.slashMenuIndex = i;
-                  requestUpdate();
-                }}
+                @mouseenter=${
+                  () => {
+                    vs.slashMenuIndex = i;
+                    requestUpdate();
+                  }
+                }
               >
                 ${vs.slashMenuCommand?.icon
                   ? html`<span class="slash-menu-icon">${icons[vs.slashMenuCommand.icon]}</span>`
@@ -665,10 +682,12 @@ function renderSlashMenu(
               role="option"
               aria-selected=${globalIdx === vs.slashMenuIndex}
               @click=${() => selectSlashCommand(cmd, props, requestUpdate)}
-              @mouseenter=${() => {
-                vs.slashMenuIndex = globalIdx;
-                requestUpdate();
-              }}
+              @mouseenter=${
+                () => {
+                  vs.slashMenuIndex = globalIdx;
+                  requestUpdate();
+                }
+              }
             >
               ${cmd.icon ? html`<span class="slash-menu-icon">${icons[cmd.icon]}</span>` : nothing}
               <span class="slash-menu-name">/${cmd.name}</span>
@@ -694,12 +713,14 @@ function renderSlashMenu(
       ${hiddenCount > 0
         ? html`<button
             class="slash-menu-show-more"
-            @click=${(e: Event) => {
-              e.preventDefault();
-              e.stopPropagation();
-              vs.slashMenuExpanded = true;
-              updateSlashMenu(props.draft, requestUpdate);
-            }}
+            @click=${
+              (e: Event) => {
+                e.preventDefault();
+                e.stopPropagation();
+                vs.slashMenuExpanded = true;
+                updateSlashMenu(props.draft, requestUpdate);
+              }
+            }
           >
             Show ${hiddenCount} more command${hiddenCount !== 1 ? "s" : ""}
           </button>`
@@ -903,6 +924,13 @@ export function renderChat(props: ChatProps) {
   `;
 
   const handleKeyDown = (e: KeyboardEvent) => {
+    // During IME composition, suppress all shortcut/menu handling so the IME
+    // candidate window can process navigation and commit keys without interference.
+    // See openclaw/openclaw#125901 (CJK IME input broken in Web UI).
+    if (e.isComposing || vs.composing) {
+      return;
+    }
+
     // Slash menu navigation — arg mode
     if (vs.slashMenuOpen && vs.slashMenuMode === "args" && vs.slashMenuArgItems.length > 0) {
       const len = vs.slashMenuArgItems.length;
@@ -1021,6 +1049,12 @@ export function renderChat(props: ChatProps) {
   const handleInput = (e: Event) => {
     const target = e.target as HTMLTextAreaElement;
     adjustTextareaHeight(target);
+    // Skip draft/slash-menu update during IME composition. Programmatically
+    // setting `textarea.value` while the IME is composing can disrupt the
+    // candidate window on macOS and Windows IMEs (openclaw/openclaw#125901).
+    if (vs.composing) {
+      return;
+    }
     updateSlashMenu(target.value, requestUpdate);
     inputHistory.reset();
     props.onDraftChange(target.value);
@@ -1142,6 +1176,20 @@ export function renderChat(props: ChatProps) {
           .value=${props.draft}
           dir=${detectTextDirection(props.draft)}
           ?disabled=${!props.connected}
+          @compositionstart=${
+            () => {
+              vs.composing = true;
+            }
+          }
+          @compositionend=${
+            (e: CompositionEvent) => {
+              vs.composing = false;
+              const target = e.target as HTMLTextAreaElement;
+              updateSlashMenu(target.value, requestUpdate);
+              inputHistory.reset();
+              props.onDraftChange(target.value);
+            }
+          }
           @keydown=${handleKeyDown}
           @input=${handleInput}
           @paste=${(e: ClipboardEvent) => handlePaste(e, props)}
@@ -1153,9 +1201,11 @@ export function renderChat(props: ChatProps) {
           <div class="agent-chat__toolbar-left">
             <button
               class="agent-chat__input-btn"
-              @click=${() => {
-                document.querySelector<HTMLInputElement>(".agent-chat__file-input")?.click();
-              }}
+              @click=${
+                () => {
+                  document.querySelector<HTMLInputElement>(".agent-chat__file-input")?.click();
+                }
+              }
               title="Attach file"
               aria-label="Attach file"
               ?disabled=${!props.connected}
@@ -1169,46 +1219,48 @@ export function renderChat(props: ChatProps) {
                     class="agent-chat__input-btn ${vs.sttRecording
                       ? "agent-chat__input-btn--recording"
                       : ""}"
-                    @click=${() => {
-                      if (vs.sttRecording) {
-                        stopStt();
-                        vs.sttRecording = false;
-                        vs.sttInterimText = "";
-                        requestUpdate();
-                      } else {
-                        const started = startStt({
-                          onTranscript: (text, isFinal) => {
-                            if (isFinal) {
-                              const current = getDraft();
-                              const sep = current && !current.endsWith(" ") ? " " : "";
-                              props.onDraftChange(current + sep + text);
+                    @click=${
+                      () => {
+                        if (vs.sttRecording) {
+                          stopStt();
+                          vs.sttRecording = false;
+                          vs.sttInterimText = "";
+                          requestUpdate();
+                        } else {
+                          const started = startStt({
+                            onTranscript: (text, isFinal) => {
+                              if (isFinal) {
+                                const current = getDraft();
+                                const sep = current && !current.endsWith(" ") ? " " : "";
+                                props.onDraftChange(current + sep + text);
+                                vs.sttInterimText = "";
+                              } else {
+                                vs.sttInterimText = text;
+                              }
+                              requestUpdate();
+                            },
+                            onStart: () => {
+                              vs.sttRecording = true;
+                              requestUpdate();
+                            },
+                            onEnd: () => {
+                              vs.sttRecording = false;
                               vs.sttInterimText = "";
-                            } else {
-                              vs.sttInterimText = text;
-                            }
-                            requestUpdate();
-                          },
-                          onStart: () => {
+                              requestUpdate();
+                            },
+                            onError: () => {
+                              vs.sttRecording = false;
+                              vs.sttInterimText = "";
+                              requestUpdate();
+                            },
+                          });
+                          if (started) {
                             vs.sttRecording = true;
                             requestUpdate();
-                          },
-                          onEnd: () => {
-                            vs.sttRecording = false;
-                            vs.sttInterimText = "";
-                            requestUpdate();
-                          },
-                          onError: () => {
-                            vs.sttRecording = false;
-                            vs.sttInterimText = "";
-                            requestUpdate();
-                          },
-                        });
-                        if (started) {
-                          vs.sttRecording = true;
-                          requestUpdate();
+                          }
                         }
                       }
-                    }}
+                    }
                     title=${vs.sttRecording ? "Stop recording" : "Voice input"}
                     aria-label=${vs.sttRecording ? "Stop recording" : "Voice input"}
                     ?disabled=${!props.connected}
