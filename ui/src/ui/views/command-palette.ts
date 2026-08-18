@@ -181,6 +181,9 @@ function handleKeydown(e: KeyboardEvent, props: CommandPaletteProps) {
       scrollActiveIntoView();
       break;
     case "Enter":
+      // Do not select while a CJK IME composition is in progress.
+      // e.isComposing is the modern standard; keyCode 229 is the legacy fallback.
+      if (e.isComposing || e.keyCode === 229) break;
       e.preventDefault();
       if (items[props.activeIndex]) {
         selectItem(items[props.activeIndex], props);
