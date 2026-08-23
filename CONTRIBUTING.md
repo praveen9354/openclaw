@@ -146,6 +146,14 @@ We welcome people across all skill sets — engineering, documentation, communit
 We review every human-only-written application carefully and add maintainers slowly and deliberately.
 Please allow a few weeks for a response.
 
+## Reporting Issues
+
+When filing a bug report, please include:
+
+- **OpenClaw version** — run `openclaw --version` and paste the output.
+- **Platform** — your OS name and version (e.g. macOS 15.3, Ubuntu 24.04, Windows 11).
+- **Reproduction steps** — a minimal, numbered list of steps that reliably trigger the issue, including any relevant config or command flags.
+
 ## Report a Vulnerability
 
 We take security reports seriously. Report vulnerabilities directly to the repository where the issue lives:
