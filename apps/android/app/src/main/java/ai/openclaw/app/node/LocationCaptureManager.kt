@@ -34,6 +34,9 @@ class LocationCaptureManager(private val context: Context) {
       val cached = bestLastKnown(manager, desiredProviders, maxAgeMs)
       val location =
         cached ?: requestCurrent(manager, desiredProviders, timeoutMs)
+      if (maxAgeMs != null && cached == null && System.currentTimeMillis() - location.time > maxAgeMs) {
+        throw IllegalStateException("LOCATION_TIMEOUT: live fix is stale (exceeds maxAgeMs)")
+      }
 
       val timestamp = DateTimeFormatter.ISO_INSTANT.format(Instant.ofEpochMilli(location.time))
       val source = location.provider
