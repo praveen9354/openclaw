@@ -178,22 +178,15 @@ async function readQueryDigestBundle(rootDir: string): Promise<QueryDigestBundle
   return { pages, claims };
 }
 
+const GENERATED_MARKER_LINE_PATTERN = /^\s*<!--\s*openclaw:[^>]*-->\s*$/;
+
 function buildSnippet(raw: string, query: string): string {
   const queryLower = normalizeLowercaseStringOrEmpty(query);
-  const matchingLine = raw
-    .split(/\r?\n/)
-    .find(
-      (line) =>
-        normalizeLowercaseStringOrEmpty(line).includes(queryLower) && line.trim().length > 0,
-    );
-  return (
-    matchingLine?.trim() ||
-    raw
-      .split(/\r?\n/)
-      .find((line) => line.trim().length > 0)
-      ?.trim() ||
-    ""
+  const lines = raw.split(/\r?\n/).filter((line) => !GENERATED_MARKER_LINE_PATTERN.test(line));
+  const matchingLine = lines.find(
+    (line) => normalizeLowercaseStringOrEmpty(line).includes(queryLower) && line.trim().length > 0,
   );
+  return matchingLine?.trim() || lines.find((line) => line.trim().length > 0)?.trim() || "";
 }
 
 function buildPageSearchText(page: QueryableWikiPage): string {
